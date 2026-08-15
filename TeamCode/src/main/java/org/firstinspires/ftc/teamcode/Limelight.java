@@ -1,0 +1,249 @@
+package org.firstinspires.ftc.teamcode;
+
+import android.annotation.SuppressLint;
+
+import com.qualcomm.hardware.limelightvision.LLResult;
+import com.qualcomm.hardware.limelightvision.LLResultTypes;
+import com.qualcomm.hardware.limelightvision.Limelight3A;
+import com.qualcomm.robotcore.hardware.HardwareMap;
+import com.qualcomm.robotcore.hardware.IMU;
+
+import org.firstinspires.ftc.robotcore.external.Telemetry;
+import org.firstinspires.ftc.robotcore.external.navigation.Pose3D;
+import org.firstinspires.ftc.robotcore.external.navigation.YawPitchRollAngles;
+
+import java.util.List;
+
+public class Limelight {
+
+    private Telemetry telemetry;
+
+    public Limelight3A limelight;
+    private double goalYaw; // inches
+    private double goalRange; // in
+    private double blueSideX, blueSideY, redSideX, redSideY;
+    private double blueSideXMT2, blueSideYMT2, redSideXMT2, redSideYMT2;
+
+    private int goalTagId;
+    private int teamID;
+    private static final double METERS_TO_INCHES = 39.3701;
+
+    private double tx, ty, x, y, yaw;
+
+    private boolean PPG,PGP,GPP;
+    public boolean seeObelisk = false;
+    public boolean isDataCurrent;
+
+    private final double camera_height = 16.75; // in
+    private final double target_height = 29.5; // in
+    private double camera_angle = -0.002; // Using LimelightAngleSetter
+
+    IMU imu;
+
+    @SuppressLint("DefaultLocale")
+    public void getTagLocations(String color, IMU imu) {
+        LLResult result;
+        YawPitchRollAngles orientation;
+
+        if (color.equals("Red")) {
+            limelight.pipelineSwitch(1);
+
+            orientation = imu.getRobotYawPitchRollAngles();
+            limelight.updateRobotOrientation(orientation.getYaw());
+
+            result = limelight.getLatestResult();
+            List<LLResultTypes.FiducialResult> fiducials = result.getFiducialResults();
+
+            for (LLResultTypes.FiducialResult fiducial : fiducials) {
+                int tagId = fiducial.getFiducialId();
+                if (tagId==24) {
+                    Pose3D botposeRedMT2 = result.getBotpose_MT2();
+                    redSideXMT2 = botposeRedMT2.getPosition().x;
+                    redSideYMT2 = botposeRedMT2.getPosition().y;
+                    Pose3D botposeRed = result.getBotpose();
+                    redSideX = botposeRed.getPosition().x;
+                    redSideY = botposeRed.getPosition().y;
+//                    telemetry.addLine(String.format("Red: xMT2=%6.2f, yMT2=%6.2f",redSideXMT2,redSideYMT2));
+//                    telemetry.addLine(String.format("     x=%6.2f, y=%6.2f",redSideX,redSideY));
+                }
+            }
+        }
+
+        if (color.equals("Blue")) {
+            limelight.pipelineSwitch(5);
+
+            orientation = imu.getRobotYawPitchRollAngles();
+            limelight.updateRobotOrientation(orientation.getYaw());
+
+            result = limelight.getLatestResult();
+            List<LLResultTypes.FiducialResult> fiducials = result.getFiducialResults();
+
+            for (LLResultTypes.FiducialResult fiducial : fiducials) {
+                int tagId = fiducial.getFiducialId();
+                if (tagId==20) {
+                    Pose3D botposeBlueMT2 = result.getBotpose_MT2();
+                    blueSideXMT2 = botposeBlueMT2.getPosition().x;
+                    blueSideYMT2 = botposeBlueMT2.getPosition().y;
+                    Pose3D botposeBlue = result.getBotpose();
+                    blueSideX = botposeBlue.getPosition().x;
+                    blueSideY = botposeBlue.getPosition().y;
+//                    telemetry.addLine(String.format("Blue: xMT2=%6.2f, yMT2=%6.2f",blueSideXMT2,blueSideYMT2));
+//                    telemetry.addLine(String.format("      x=%6.2f, y=%6.2f",blueSideX,blueSideY));
+                }
+            }
+        }
+    }
+
+    public String getObelisk() {
+        if (PGP) {
+            return "PGP";
+        } else if (GPP) {
+            return "GPP";
+        } else if (PPG) {
+            return "PPG";
+        } else {
+            return "No Tag Detected";
+        }
+    }
+
+    public void init(HardwareMap hardwareMap, IMU imu, Telemetry telemetry) {
+        this.imu = imu;
+        this.telemetry = telemetry;
+
+        limelight = hardwareMap.get(Limelight3A.class, "limelight");
+        limelight.setPollRateHz(100); // This sets how often we ask Limelight for data (100 times per second)
+        telemetry.setMsTransmissionInterval(11);
+        limelight.start(); // This tells Limelight to start looking!
+    }
+
+    public boolean process() {
+
+        LLResult result = limelight.getLatestResult();
+        if (result != null && result.isValid()) {
+            Pose3D botPose = result.getBotpose();
+
+            tx = result.getTx(); // How far left or right the target is (degrees)
+            ty = result.getTy(); // How far up or down the target is (degrees)
+
+            double ta = result.getTa(); // How big the target looks (0%-100% of the image)
+            if (botPose != null) {
+
+                goalYaw = botPose.getOrientation().getYaw();
+                goalRange = (target_height - camera_height) / (Math.tan(Math.toRadians(ty)+camera_angle));
+
+                isDataCurrent = true;
+            } else {
+                isDataCurrent = false;
+            }
+
+//            telemetry.addData("pipeline", result.getPipelineIndex());
+//            telemetry.addData("limelight Range", goalRange);
+        } else {
+            isDataCurrent = false;
+//            telemetry.addData("Limelight", "No Targets");
+        }
+        return isDataCurrent;
+    }
+
+    public boolean hasResults() {
+        LLResult result = limelight.getLatestResult();
+        return (result != null && result.isValid());
+    }
+
+    public void processRobotPoseMt1() {
+//        limelight.pipelineSwitch(6); // obelisk
+//        YawPitchRollAngles orientation = imu.getRobotYawPitchRollAngles();
+//        limelight.updateRobotOrientation(orientation.getYaw());
+        LLResult result = limelight.getLatestResult();
+        if (result != null && result.isValid()) {
+            Pose3D botPose = result.getBotpose();
+            if (botPose != null) {
+                x = botPose.getPosition().x * METERS_TO_INCHES;
+                y = botPose.getPosition().y * METERS_TO_INCHES;
+                yaw = botPose.getOrientation().getYaw();
+            }
+        }
+    }
+
+    public void processRobotPoseMt2() {
+//        int oldPipeline = limelight.getLatestResult().getPipelineIndex();
+
+//        limelight.pipelineSwitch(6); // obelisk
+        YawPitchRollAngles orientation = imu.getRobotYawPitchRollAngles();
+        limelight.updateRobotOrientation(orientation.getYaw() + 180);
+        LLResult result = limelight.getLatestResult();
+        if (result != null && result.isValid()) {
+            Pose3D botPose = result.getBotpose_MT2();
+            x = botPose.getPosition().x*METERS_TO_INCHES + 72;
+            y = botPose.getPosition().y*METERS_TO_INCHES + 72;
+        }
+
+//        limelight.pipelineSwitch(oldPipeline);
+    }
+
+    @SuppressLint("DefaultLocale")
+    public void readObelisk() {
+
+        limelight.pipelineSwitch(6); //targets closest
+
+        YawPitchRollAngles orientation = imu.getRobotYawPitchRollAngles();
+        limelight.updateRobotOrientation(orientation.getYaw());
+
+        LLResult result = limelight.getLatestResult();
+
+        List<LLResultTypes.FiducialResult> fiducials = result.getFiducialResults();
+        if (fiducials.isEmpty()) {
+            seeObelisk = false;
+        } else {
+
+            for (LLResultTypes.FiducialResult fiducial : fiducials) {
+                int tagId = fiducial.getFiducialId();
+
+                if (tagId == 22) { //PGP
+                    PPG = false;
+                    GPP = false;
+                    PGP = true;
+                    seeObelisk = true;
+                } else if (tagId == 23) { //PPG
+                    PPG = true;
+                    GPP = false;
+                    PGP = false;
+                    seeObelisk = true;
+                } else if (tagId == 21) { //GPP
+                    PPG = false;
+                    GPP = true;
+                    PGP = false;
+                    seeObelisk = true;
+                }
+            }
+        }
+    }
+
+    public void setTeam(int id) {
+        if (id == 20) {
+            limelight.pipelineSwitch(5);
+            teamID = 20;
+        } else if (id == 24) {
+            limelight.pipelineSwitch(1);
+            teamID = 24;
+        }
+    }
+
+    public void setCameraAngle(double angle) {
+        this.camera_angle = angle;
+    }
+
+    public int getPipeline() { return limelight.getStatus().getPipelineIndex(); }
+    public int getTeam() { return teamID; }
+
+    public double getCameraAngle() { return camera_angle; }
+    public double getX() { return x; }
+    public double getY() { return y; }
+    public double getTx() { return tx; };
+    public double getTy() { return ty; };
+    public double getYaw() { return goalYaw; }
+    public double getRange() { return goalRange; }
+    public double getGoalTagId() { return goalTagId; }
+
+    public void setGoalTagID(int value) { goalTagId = value; }
+}
